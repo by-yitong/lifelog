@@ -1,17 +1,22 @@
 import 'dart:convert';
 import 'dart:io';
 
+import 'package:drift/drift.dart' show Constant, InsertMode, Value;
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:share_plus/share_plus.dart';
 
+import '../../../core/db/database.dart';
 import '../../../core/theme/app_colors.dart';
 import '../../../core/theme/app_metrics.dart';
 import '../../../core/theme/app_typography.dart';
+import '../../../core/update/app_updater.dart'
+    show currentAppVersion, pickBackupFileText;
+import '../../../core/update/update_flow.dart';
 import '../../app_state.dart';
 
-/// 设置：主题、默认排序、数据导出、关于。
+/// 设置：主题、排序、数据备份导入、检查更新、关于。
 class SettingsScreen extends ConsumerWidget {
   const SettingsScreen({super.key});
 
@@ -80,20 +85,41 @@ class SettingsScreen extends ConsumerWidget {
             child: Column(
               children: [
                 ListTile(
+                  leading: const Icon(Icons.backup_outlined),
+                  title: const Text('备份数据'),
+                  subtitle: Text('导出 JSON 备份，含全部计数器与记录',
+                      style: AppTypography.caption(color: colors.inkFaint)),
+                  onTap: () => _export(context, ref, ExportFormat.json),
+                ),
+                Divider(height: 1, color: colors.outline),
+                ListTile(
+                  leading: const Icon(Icons.restore_outlined),
+                  title: const Text('从备份导入'),
+                  subtitle: Text('支持合并或覆盖现有数据（背景图片不含在内）',
+                      style: AppTypography.caption(color: colors.inkFaint)),
+                  onTap: () => _importBackup(context, ref),
+                ),
+                Divider(height: 1, color: colors.outline),
+                ListTile(
                   leading: const Icon(Icons.table_view_outlined),
                   title: const Text('导出 CSV'),
                   subtitle: Text('用表格软件打开', style: AppTypography.caption(color: colors.inkFaint)),
                   onTap: () => _export(context, ref, ExportFormat.csv),
                 ),
-                Divider(height: 1, color: colors.outline),
-                ListTile(
-                  leading: const Icon(Icons.data_object_outlined),
-                  title: const Text('导出 JSON'),
-                  subtitle: Text('完整备份，含全部记录', style: AppTypography.caption(color: colors.inkFaint)),
-                  onTap: () => _export(context, ref, ExportFormat.json),
-                ),
               ],
             ),
+          ),
+
+          const SizedBox(height: Space.xxl),
+          _SectionLabel('通用'),
+          const SizedBox(height: Space.sm),
+          Container(
+            decoration: BoxDecoration(
+              color: colors.surface,
+              borderRadius: BorderRadius.circular(RadiusToken.field),
+            ),
+            clipBehavior: Clip.antiAlias,
+            child: const _UpdateCheckTile(),
           ),
 
           const SizedBox(height: Space.xxl),
@@ -109,8 +135,13 @@ class SettingsScreen extends ConsumerWidget {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text('数一数 v1.0.0',
-                    style: AppTypography.title(color: colors.ink)),
+                FutureBuilder<String>(
+                  future: currentAppVersion(),
+                  builder: (context, snap) => Text(
+                    '数一数 v${snap.data ?? "…"}',
+                    style: AppTypography.title(color: colors.ink),
+                  ),
+                ),
                 const SizedBox(height: Space.xs),
                 Text('记录一件事情做了多少次。所有数据只保存在这台手机上。',
                     style: AppTypography.body(color: colors.inkSub)),
@@ -163,6 +194,9 @@ class SettingsScreen extends ConsumerWidget {
                   'dailyTarget': c.dailyTarget,
                   'pinned': c.pinned,
                   'archived': c.archived,
+                  'tag': c.tag,
+                  'bgImagePath': c.bgImagePath,
+                  'lastTouchedAt': c.lastTouchedAt?.toIso8601String(),
                   'createdAt': c.createdAt.toIso8601String(),
                 },
             ],
@@ -199,6 +233,185 @@ enum ExportFormat { csv, json }
 
 String _csv(String? s) => '"${(s ?? '').replaceAll('"', '""')}"';
 
+/// ---------- 从备份导入 ----------
+
+class _BackupData {
+  final List<CountersCompanion> counters;
+  final List<EntriesCompanion> entries;
+
+  const _BackupData({required this.counters, required this.entries});
+}
+
+Future<void> _importBackup(BuildContext context, WidgetRef ref) async {
+  final messenger = ScaffoldMessenger.of(context);
+  try {
+    final text = await pickBackupFileText();
+    if (text == null || !context.mounted) return; // 用户取消
+
+    final raw = jsonDecode(text);
+    if (raw is! Map<String, dynamic> ||
+        raw['counters'] is! List ||
+        raw['entries'] is! List) {
+      messenger.showSnackBar(const SnackBar(content: Text('文件格式不对，不是「数一数」的备份文件')));
+      return;
+    }
+
+    final data = _parseBackup(raw);
+
+    if (!context.mounted) return;
+    final mode = await _pickImportMode(context, data.counters.length,
+        data.entries.length);
+    if (mode == null || !context.mounted) return;
+
+    final db = ref.read(databaseProvider);
+    var nCounters = 0;
+    var nEntries = 0;
+    await db.transaction(() async {
+      if (mode == 'replace') {
+        // 覆盖：先清空（先删记录再删计数器，满足外键），再整批写入
+        await db.batch((b) {
+          b.deleteWhere(db.entries, (_) => const Constant(true));
+          b.deleteWhere(db.counters, (_) => const Constant(true));
+          b.insertAll(db.counters, data.counters);
+          b.insertAll(db.entries, data.entries);
+        });
+        nCounters = data.counters.length;
+        nEntries = data.entries.length;
+      } else {
+        // 合并：跳过已存在的 id；引用不存在计数器的记录丢弃
+        final existingCounterIds = <String>{};
+        for (final row in await db.select(db.counters).get()) {
+          existingCounterIds.add(row.id);
+        }
+        final importedCounterIds =
+            data.counters.map((c) => c.id.value).toSet();
+        final existingEntryIds = <String>{
+          for (final row in await db.select(db.entries).get()) row.id
+        };
+        final freshEntries = data.entries
+            .where((e) => importedCounterIds.contains(e.counterId.value))
+            .where((e) => !existingEntryIds.contains(e.id.value))
+            .toList();
+        final freshCounters = data.counters
+            .where((c) => !existingCounterIds.contains(c.id.value))
+            .toList();
+
+        await db.batch((b) {
+          b.insertAll(db.counters, freshCounters,
+              mode: InsertMode.insertOrIgnore);
+          b.insertAll(db.entries, freshEntries,
+              mode: InsertMode.insertOrIgnore);
+        });
+        nCounters = freshCounters.length;
+        nEntries = freshEntries.length;
+      }
+    });
+
+    messenger.showSnackBar(SnackBar(
+      content: Text(mode == 'replace'
+          ? '已覆盖导入 ${data.counters.length} 个计数器、${data.entries.length} 条记录'
+          : '合并完成：新增 $nCounters 个计数器、$nEntries 条记录'),
+    ));
+  } catch (e) {
+    messenger.showSnackBar(SnackBar(content: Text('导入失败：$e')));
+  }
+}
+
+Future<String?> _pickImportMode(
+  BuildContext context,
+  int counterCount,
+  int entryCount,
+) {
+  return showDialog<String>(
+    context: context,
+    builder: (dialogContext) {
+      final colors = dialogContext.appColors;
+      return AlertDialog(
+        title: const Text('导入这份备份？'),
+        content: Text(
+          '包含 $counterCount 个计数器、$entryCount 条记录。\n\n'
+          '· 合并导入：保留现有数据，相同的编号自动跳过\n'
+          '· 覆盖导入：清空现有全部数据后写入',
+          style: AppTypography.body(color: colors.inkSub),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(dialogContext),
+            child: const Text('取消'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(dialogContext, 'merge'),
+            child: const Text('合并导入'),
+          ),
+          FilledButton(
+            style: FilledButton.styleFrom(backgroundColor: colors.danger),
+            onPressed: () => Navigator.pop(dialogContext, 'replace'),
+            child: const Text('覆盖导入'),
+          ),
+        ],
+      );
+    },
+  );
+}
+
+_BackupData _parseBackup(Map<String, dynamic> raw) {
+  final counters = <CountersCompanion>[];
+  for (final item in raw['counters'] as List) {
+    if (item is! Map<String, dynamic>) continue;
+    final id = item['id'];
+    if (id is! String || id.isEmpty) continue;
+    counters.add(_counterFromJson(item));
+  }
+  final counterIds = counters.map((c) => c.id.value).toSet();
+  final entries = <EntriesCompanion>[];
+  for (final item in raw['entries'] as List) {
+    if (item is! Map<String, dynamic>) continue;
+    final id = item['id'];
+    final counterId = item['counterId'];
+    if (id is! String || id.isEmpty) continue;
+    if (counterId is! String || !counterIds.contains(counterId)) continue;
+    entries.add(_entryFromJson(item));
+  }
+  return _BackupData(counters: counters, entries: entries);
+}
+
+CountersCompanion _counterFromJson(Map<String, dynamic> j) {
+  DateTime? parseDate(String key) =>
+      DateTime.tryParse(j[key] as String? ?? '');
+  return CountersCompanion.insert(
+    id: j['id'] as String,
+    name: ((j['name'] as String?) ?? '').trim().isEmpty
+        ? '未命名'
+        : j['name'] as String,
+    emoji: Value((j['emoji'] as String?) ?? '✨'),
+    colorIndex: Value((j['colorIndex'] as num?)?.toInt() ?? 0),
+    bgImagePath: Value(j['bgImagePath'] as String?),
+    unit: Value(((j['unit'] as String?) ?? '').isEmpty
+        ? '次'
+        : j['unit'] as String),
+    tag: Value((j['tag'] as String?) ?? ''),
+    stepSize: Value(((j['stepSize'] as num?)?.toInt() ?? 1) < 1
+        ? 1
+        : (j['stepSize'] as num).toInt()),
+    dailyTarget: Value((j['dailyTarget'] as num?)?.toInt()),
+    pinned: Value((j['pinned'] as bool?) ?? false),
+    archived: Value((j['archived'] as bool?) ?? false),
+    lastTouchedAt: Value(parseDate('lastTouchedAt')),
+    createdAt: parseDate('createdAt') ?? DateTime.now(),
+  );
+}
+
+EntriesCompanion _entryFromJson(Map<String, dynamic> j) {
+  return EntriesCompanion.insert(
+    id: j['id'] as String,
+    counterId: j['counterId'] as String,
+    delta: (j['delta'] as num?)?.toInt() ?? 0,
+    valueAfter: (j['valueAfter'] as num?)?.toInt() ?? 0,
+    occurredAt:
+        DateTime.tryParse(j['occurredAt'] as String? ?? '') ?? DateTime.now(),
+  );
+}
+
 class _SectionLabel extends StatelessWidget {
   final String text;
 
@@ -208,6 +421,28 @@ class _SectionLabel extends StatelessWidget {
   Widget build(BuildContext context) {
     return Text(text,
         style: AppTypography.caption(color: context.appColors.inkSub));
+  }
+}
+
+/// 检查更新入口：显示当前版本，点击去 GitHub Releases 比对。
+class _UpdateCheckTile extends ConsumerWidget {
+  const _UpdateCheckTile();
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final colors = context.appColors;
+    return ListTile(
+      leading: const Icon(Icons.cloud_download_outlined),
+      title: const Text('检查更新'),
+      subtitle: FutureBuilder<String>(
+        future: currentAppVersion(),
+        builder: (context, snap) => Text(
+          '当前版本 v${snap.data ?? "…"} · 通过 GitHub 分发',
+          style: AppTypography.caption(color: colors.inkFaint),
+        ),
+      ),
+      onTap: () => checkForUpdate(context, ref, silent: false),
+    );
   }
 }
 

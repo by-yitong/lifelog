@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 应用内更新：共享 cache/updates/ 下的 APK 给系统安装器 -->
+<paths>
+    <cache-path
+        name="updates"
+        path="updates/" />
+</paths>

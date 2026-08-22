@@ -9,6 +9,7 @@ import '../../../core/db/database.dart';
 import '../../../core/theme/app_colors.dart';
 import '../../../core/theme/app_metrics.dart';
 import '../../../core/theme/app_typography.dart';
+import '../../../core/update/update_flow.dart';
 import '../../../shared/widgets/frosted_tag_bar.dart';
 import '../../../shared/widgets/motion.dart';
 import '../../app_state.dart';
@@ -33,6 +34,15 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
   String _query = '';
   int _page = 0;
   final PageController _pageController = PageController();
+
+  @override
+  void initState() {
+    super.initState();
+    // 启动后静默检查应用内更新（最多 24 小时一次）
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) maybeAutoCheckUpdate(context, ref);
+    });
+  }
 
   // ---------- 顶栏/底栏随滚动隐藏 ----------
   // controller: 1 = 显示，0 = 隐藏
