@@ -146,21 +146,27 @@ final countersSummaryProvider = StreamProvider<List<CounterSummary>>((ref) {
     repo.watchCounters(),
     repo.watchAllEntries(),
     (List<Counter> counters, List<Entry> entries) {
+      // 初始值记录计入总数，但不计入每日/每周/每月/连续统计。
       final byCounter = <String, List<(DateTime, int)>>{};
+      final countableBy = <String, List<(DateTime, int)>>{};
       for (final e in entries) {
         (byCounter[e.counterId] ??= []).add((e.occurredAt, e.delta));
+        if (!e.isInitial) {
+          (countableBy[e.counterId] ??= []).add((e.occurredAt, e.delta));
+        }
       }
 
       final now = DateTime.now();
       final summaries = counters.map((c) {
         final list = byCounter[c.id] ?? const <(DateTime, int)>[];
+        final countable = countableBy[c.id] ?? const <(DateTime, int)>[];
         return CounterSummary(
           counter: c,
           total: sumDeltas(list),
-          today: countToday(list, now),
-          week: countThisWeek(list, now),
-          month: countThisMonth(list, now),
-          streak: streakDays(list, now),
+          today: countToday(countable, now),
+          week: countThisWeek(countable, now),
+          month: countThisMonth(countable, now),
+          streak: streakDays(countable, now),
         );
       }).toList();
 

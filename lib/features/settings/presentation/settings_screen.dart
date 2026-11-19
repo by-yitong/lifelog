@@ -208,6 +208,7 @@ class SettingsScreen extends ConsumerWidget {
                   'delta': e.delta,
                   'valueAfter': e.valueAfter,
                   'occurredAt': e.occurredAt.toIso8601String(),
+                  'isInitial': e.isInitial,
                 },
             ],
           });
@@ -409,6 +410,7 @@ EntriesCompanion _entryFromJson(Map<String, dynamic> j) {
     valueAfter: (j['valueAfter'] as num?)?.toInt() ?? 0,
     occurredAt:
         DateTime.tryParse(j['occurredAt'] as String? ?? '') ?? DateTime.now(),
+    isInitial: Value((j['isInitial'] as bool?) ?? false),
   );
 }
 

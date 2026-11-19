@@ -93,10 +93,19 @@ class _OverviewCards extends StatelessWidget {
   Widget build(BuildContext context) {
     final now = DateTime.now();
     final records = [for (final e in entries) (e.occurredAt, e.delta)];
+    // 初始值记录计入累计，不计入今日/连续/活跃天数。
+    final countable = [
+      for (final e in entries)
+        if (!e.isInitial) (e.occurredAt, e.delta),
+    ];
     final total = sumDeltas(records);
-    final today = countToday(records, now);
-    final streak = streakDays(records, now);
-    final activeDays = entries.where((e) => e.delta > 0).map((e) => startOfDay(e.occurredAt)).toSet().length;
+    final today = countToday(countable, now);
+    final streak = streakDays(countable, now);
+    final activeDays = entries
+        .where((e) => e.delta > 0 && !e.isInitial)
+        .map((e) => startOfDay(e.occurredAt))
+        .toSet()
+        .length;
 
     return Column(
       children: [

@@ -68,7 +68,7 @@ void main() {
     expect(await db.select(db.entries).get(), isEmpty);
   });
 
-  test('createCounter 支持初始值：事务内写入首条记录', () async {
+  test('createCounter 支持初始值：事务内写入首条记录并标记 isInitial', () async {
     const id = 'c-init';
     await repo.createCounter(
       CountersCompanion.insert(
@@ -80,12 +80,13 @@ void main() {
       initialValue: 235,
     );
 
-    expect(await repo.currentValue(id), 235);
+    expect(await repo.currentValue(id), 235); // 总数包含初始值
     final entries = await repo.watchEntriesOf(id).first;
     expect(entries, hasLength(1));
     expect(entries.single.delta, 235);
     expect(entries.single.valueAfter, 235);
     expect(entries.single.occurredAt, DateTime(2026, 1, 1));
+    expect(entries.single.isInitial, isTrue);
 
     final counter = await (db.select(db.counters)).getSingle();
     expect(counter.lastTouchedAt, DateTime(2026, 1, 1));

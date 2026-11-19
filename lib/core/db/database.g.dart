@@ -836,6 +836,21 @@ class $EntriesTable extends Entries with TableInfo<$EntriesTable, Entry> {
     type: DriftSqlType.dateTime,
     requiredDuringInsert: true,
   );
+  static const VerificationMeta _isInitialMeta = const VerificationMeta(
+    'isInitial',
+  );
+  @override
+  late final GeneratedColumn<bool> isInitial = GeneratedColumn<bool>(
+    'is_initial',
+    aliasedName,
+    false,
+    type: DriftSqlType.bool,
+    requiredDuringInsert: false,
+    defaultConstraints: GeneratedColumn.constraintIsAlways(
+      'CHECK ("is_initial" IN (0, 1))',
+    ),
+    defaultValue: const Constant(false),
+  );
   @override
   List<GeneratedColumn> get $columns => [
     id,
@@ -843,6 +858,7 @@ class $EntriesTable extends Entries with TableInfo<$EntriesTable, Entry> {
     delta,
     valueAfter,
     occurredAt,
+    isInitial,
   ];
   @override
   String get aliasedName => _alias ?? actualTableName;
@@ -893,6 +909,12 @@ class $EntriesTable extends Entries with TableInfo<$EntriesTable, Entry> {
     } else if (isInserting) {
       context.missing(_occurredAtMeta);
     }
+    if (data.containsKey('is_initial')) {
+      context.handle(
+        _isInitialMeta,
+        isInitial.isAcceptableOrUnknown(data['is_initial']!, _isInitialMeta),
+      );
+    }
     return context;
   }
 
@@ -922,6 +944,10 @@ class $EntriesTable extends Entries with TableInfo<$EntriesTable, Entry> {
         DriftSqlType.dateTime,
         data['${effectivePrefix}occurred_at'],
       )!,
+      isInitial: attachedDatabase.typeMapping.read(
+        DriftSqlType.bool,
+        data['${effectivePrefix}is_initial'],
+      )!,
     );
   }
 
@@ -943,12 +969,16 @@ class Entry extends DataClass implements Insertable<Entry> {
 
   /// 动作发生时间。
   final DateTime occurredAt;
+
+  /// 新建时填的"初始值"记录：计入总数与历史，不计入每日/每周/每月统计。
+  final bool isInitial;
   const Entry({
     required this.id,
     required this.counterId,
     required this.delta,
     required this.valueAfter,
     required this.occurredAt,
+    required this.isInitial,
   });
   @override
   Map<String, Expression> toColumns(bool nullToAbsent) {
@@ -958,6 +988,7 @@ class Entry extends DataClass implements Insertable<Entry> {
     map['delta'] = Variable<int>(delta);
     map['value_after'] = Variable<int>(valueAfter);
     map['occurred_at'] = Variable<DateTime>(occurredAt);
+    map['is_initial'] = Variable<bool>(isInitial);
     return map;
   }
 
@@ -968,6 +999,7 @@ class Entry extends DataClass implements Insertable<Entry> {
       delta: Value(delta),
       valueAfter: Value(valueAfter),
       occurredAt: Value(occurredAt),
+      isInitial: Value(isInitial),
     );
   }
 
@@ -982,6 +1014,7 @@ class Entry extends DataClass implements Insertable<Entry> {
       delta: serializer.fromJson<int>(json['delta']),
       valueAfter: serializer.fromJson<int>(json['valueAfter']),
       occurredAt: serializer.fromJson<DateTime>(json['occurredAt']),
+      isInitial: serializer.fromJson<bool>(json['isInitial']),
     );
   }
   @override
@@ -993,6 +1026,7 @@ class Entry extends DataClass implements Insertable<Entry> {
       'delta': serializer.toJson<int>(delta),
       'valueAfter': serializer.toJson<int>(valueAfter),
       'occurredAt': serializer.toJson<DateTime>(occurredAt),
+      'isInitial': serializer.toJson<bool>(isInitial),
     };
   }
 
@@ -1002,12 +1036,14 @@ class Entry extends DataClass implements Insertable<Entry> {
     int? delta,
     int? valueAfter,
     DateTime? occurredAt,
+    bool? isInitial,
   }) => Entry(
     id: id ?? this.id,
     counterId: counterId ?? this.counterId,
     delta: delta ?? this.delta,
     valueAfter: valueAfter ?? this.valueAfter,
     occurredAt: occurredAt ?? this.occurredAt,
+    isInitial: isInitial ?? this.isInitial,
   );
   Entry copyWithCompanion(EntriesCompanion data) {
     return Entry(
@@ -1020,6 +1056,7 @@ class Entry extends DataClass implements Insertable<Entry> {
       occurredAt: data.occurredAt.present
           ? data.occurredAt.value
           : this.occurredAt,
+      isInitial: data.isInitial.present ? data.isInitial.value : this.isInitial,
     );
   }
 
@@ -1030,13 +1067,15 @@ class Entry extends DataClass implements Insertable<Entry> {
           ..write('counterId: $counterId, ')
           ..write('delta: $delta, ')
           ..write('valueAfter: $valueAfter, ')
-          ..write('occurredAt: $occurredAt')
+          ..write('occurredAt: $occurredAt, ')
+          ..write('isInitial: $isInitial')
           ..write(')'))
         .toString();
   }
 
   @override
-  int get hashCode => Object.hash(id, counterId, delta, valueAfter, occurredAt);
+  int get hashCode =>
+      Object.hash(id, counterId, delta, valueAfter, occurredAt, isInitial);
   @override
   bool operator ==(Object other) =>
       identical(this, other) ||
@@ -1045,7 +1084,8 @@ class Entry extends DataClass implements Insertable<Entry> {
           other.counterId == this.counterId &&
           other.delta == this.delta &&
           other.valueAfter == this.valueAfter &&
-          other.occurredAt == this.occurredAt);
+          other.occurredAt == this.occurredAt &&
+          other.isInitial == this.isInitial);
 }
 
 class EntriesCompanion extends UpdateCompanion<Entry> {
@@ -1054,6 +1094,7 @@ class EntriesCompanion extends UpdateCompanion<Entry> {
   final Value<int> delta;
   final Value<int> valueAfter;
   final Value<DateTime> occurredAt;
+  final Value<bool> isInitial;
   final Value<int> rowid;
   const EntriesCompanion({
     this.id = const Value.absent(),
@@ -1061,6 +1102,7 @@ class EntriesCompanion extends UpdateCompanion<Entry> {
     this.delta = const Value.absent(),
     this.valueAfter = const Value.absent(),
     this.occurredAt = const Value.absent(),
+    this.isInitial = const Value.absent(),
     this.rowid = const Value.absent(),
   });
   EntriesCompanion.insert({
@@ -1069,6 +1111,7 @@ class EntriesCompanion extends UpdateCompanion<Entry> {
     required int delta,
     required int valueAfter,
     required DateTime occurredAt,
+    this.isInitial = const Value.absent(),
     this.rowid = const Value.absent(),
   }) : id = Value(id),
        counterId = Value(counterId),
@@ -1081,6 +1124,7 @@ class EntriesCompanion extends UpdateCompanion<Entry> {
     Expression<int>? delta,
     Expression<int>? valueAfter,
     Expression<DateTime>? occurredAt,
+    Expression<bool>? isInitial,
     Expression<int>? rowid,
   }) {
     return RawValuesInsertable({
@@ -1089,6 +1133,7 @@ class EntriesCompanion extends UpdateCompanion<Entry> {
       if (delta != null) 'delta': delta,
       if (valueAfter != null) 'value_after': valueAfter,
       if (occurredAt != null) 'occurred_at': occurredAt,
+      if (isInitial != null) 'is_initial': isInitial,
       if (rowid != null) 'rowid': rowid,
     });
   }
@@ -1099,6 +1144,7 @@ class EntriesCompanion extends UpdateCompanion<Entry> {
     Value<int>? delta,
     Value<int>? valueAfter,
     Value<DateTime>? occurredAt,
+    Value<bool>? isInitial,
     Value<int>? rowid,
   }) {
     return EntriesCompanion(
@@ -1107,6 +1153,7 @@ class EntriesCompanion extends UpdateCompanion<Entry> {
       delta: delta ?? this.delta,
       valueAfter: valueAfter ?? this.valueAfter,
       occurredAt: occurredAt ?? this.occurredAt,
+      isInitial: isInitial ?? this.isInitial,
       rowid: rowid ?? this.rowid,
     );
   }
@@ -1129,6 +1176,9 @@ class EntriesCompanion extends UpdateCompanion<Entry> {
     if (occurredAt.present) {
       map['occurred_at'] = Variable<DateTime>(occurredAt.value);
     }
+    if (isInitial.present) {
+      map['is_initial'] = Variable<bool>(isInitial.value);
+    }
     if (rowid.present) {
       map['rowid'] = Variable<int>(rowid.value);
     }
@@ -1143,6 +1193,7 @@ class EntriesCompanion extends UpdateCompanion<Entry> {
           ..write('delta: $delta, ')
           ..write('valueAfter: $valueAfter, ')
           ..write('occurredAt: $occurredAt, ')
+          ..write('isInitial: $isInitial, ')
           ..write('rowid: $rowid')
           ..write(')'))
         .toString();
@@ -1625,6 +1676,7 @@ typedef $$EntriesTableCreateCompanionBuilder =
       required int delta,
       required int valueAfter,
       required DateTime occurredAt,
+      Value<bool> isInitial,
       Value<int> rowid,
     });
 typedef $$EntriesTableUpdateCompanionBuilder =
@@ -1634,6 +1686,7 @@ typedef $$EntriesTableUpdateCompanionBuilder =
       Value<int> delta,
       Value<int> valueAfter,
       Value<DateTime> occurredAt,
+      Value<bool> isInitial,
       Value<int> rowid,
     });
 
@@ -1685,6 +1738,11 @@ class $$EntriesTableFilterComposer
 
   ColumnFilters<DateTime> get occurredAt => $composableBuilder(
     column: $table.occurredAt,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<bool> get isInitial => $composableBuilder(
+    column: $table.isInitial,
     builder: (column) => ColumnFilters(column),
   );
 
@@ -1741,6 +1799,11 @@ class $$EntriesTableOrderingComposer
     builder: (column) => ColumnOrderings(column),
   );
 
+  ColumnOrderings<bool> get isInitial => $composableBuilder(
+    column: $table.isInitial,
+    builder: (column) => ColumnOrderings(column),
+  );
+
   $$CountersTableOrderingComposer get counterId {
     final $$CountersTableOrderingComposer composer = $composerBuilder(
       composer: this,
@@ -1789,6 +1852,9 @@ class $$EntriesTableAnnotationComposer
     column: $table.occurredAt,
     builder: (column) => column,
   );
+
+  GeneratedColumn<bool> get isInitial =>
+      $composableBuilder(column: $table.isInitial, builder: (column) => column);
 
   $$CountersTableAnnotationComposer get counterId {
     final $$CountersTableAnnotationComposer composer = $composerBuilder(
@@ -1847,6 +1913,7 @@ class $$EntriesTableTableManager
                 Value<int> delta = const Value.absent(),
                 Value<int> valueAfter = const Value.absent(),
                 Value<DateTime> occurredAt = const Value.absent(),
+                Value<bool> isInitial = const Value.absent(),
                 Value<int> rowid = const Value.absent(),
               }) => EntriesCompanion(
                 id: id,
@@ -1854,6 +1921,7 @@ class $$EntriesTableTableManager
                 delta: delta,
                 valueAfter: valueAfter,
                 occurredAt: occurredAt,
+                isInitial: isInitial,
                 rowid: rowid,
               ),
           createCompanionCallback:
@@ -1863,6 +1931,7 @@ class $$EntriesTableTableManager
                 required int delta,
                 required int valueAfter,
                 required DateTime occurredAt,
+                Value<bool> isInitial = const Value.absent(),
                 Value<int> rowid = const Value.absent(),
               }) => EntriesCompanion.insert(
                 id: id,
@@ -1870,6 +1939,7 @@ class $$EntriesTableTableManager
                 delta: delta,
                 valueAfter: valueAfter,
                 occurredAt: occurredAt,
+                isInitial: isInitial,
                 rowid: rowid,
               ),
           withReferenceMapper: (p0) => p0

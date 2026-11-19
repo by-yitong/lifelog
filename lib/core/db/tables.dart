@@ -49,6 +49,9 @@ class Entries extends Table {
   /// 动作发生时间。
   DateTimeColumn get occurredAt => dateTime()();
 
+  /// 新建时填的"初始值"记录：计入总数与历史，不计入每日/每周/每月统计。
+  BoolColumn get isInitial => boolean().withDefault(const Constant(false))();
+
   @override
   Set<Column> get primaryKey => {id};
 }

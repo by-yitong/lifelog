@@ -45,6 +45,7 @@ class CounterRepository {
                 delta: initialValue,
                 valueAfter: initialValue,
                 occurredAt: now,
+                isInitial: const Value(true),
               ),
             );
         await (_db.update(_db.counters)
@@ -100,6 +101,7 @@ class CounterRepository {
         delta: delta,
         valueAfter: current + delta,
         occurredAt: at ?? now,
+        isInitial: false,
       );
       await _db.into(_db.entries).insert(entry);
       await (_db.update(_db.counters)..where((c) => c.id.equals(counterId)))

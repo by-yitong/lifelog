@@ -457,7 +457,10 @@ class _TrendSectionState extends ConsumerState<_TrendSection> {
       settingsProvider.select((s) => s.trendChartStyle),
     );
     final data = dailyCounts(
-      entries.map((e) => (e.occurredAt, e.delta)).toList(),
+      [
+        for (final e in entries)
+          if (!e.isInitial) (e.occurredAt, e.delta),
+      ],
       DateTime.now(),
       _range.days,
     );
@@ -717,10 +720,10 @@ class _HeatmapSection extends ConsumerWidget {
     final firstDay = DateTime(now.year, now.month, 1);
     final daysInMonth = DateTime(now.year, now.month + 1, 0).day;
 
-    // 按天聚合（只统计本月、正增量）
+    // 按天聚合（只统计本月、正增量；初始值记录不计入每日）
     final counts = List<int>.filled(daysInMonth, 0);
     for (final e in entries) {
-      if (e.delta <= 0) continue;
+      if (e.delta <= 0 || e.isInitial) continue;
       final d = e.occurredAt;
       if (d.year == now.year && d.month == now.month) {
         counts[d.day - 1] += e.delta;
@@ -968,7 +971,7 @@ class _EntryTile extends ConsumerWidget {
               const SizedBox(width: Space.md),
               Expanded(
                 child: Text(
-                  '$deltaText  ·  记到 ${entry.valueAfter}',
+                  '${entry.isInitial ? '初始 · ' : ''}$deltaText  ·  记到 ${entry.valueAfter}',
                   style: AppTypography.body(color: colors.ink),
                 ),
               ),
