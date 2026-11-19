@@ -208,8 +208,8 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
                         Positioned(
                           left: Space.xl,
                           right: Space.xl,
-                          bottom: Space.lg,
-                          height: 64,
+                          bottom: Space.md,
+                          height: 48,
                           // 底栏跟随顶栏一起隐藏/唤出
                           child: IgnorePointer(
                             ignoring: _chromeHidden,
@@ -346,7 +346,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
     }
 
     return GridView.builder(
-      padding: const EdgeInsets.fromLTRB(Space.xl, Space.md, Space.xl, 120),
+      padding: const EdgeInsets.fromLTRB(Space.xl, Space.md, Space.xl, 100),
       gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
         crossAxisCount: 2,
         mainAxisSpacing: Space.md,

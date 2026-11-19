@@ -1,7 +1,6 @@
-import 'dart:ui';
-
 import 'package:flutter/foundation.dart' show listEquals;
 import 'package:flutter/material.dart';
+import 'package:liquid_glass_easy/liquid_glass_easy.dart';
 
 import '../../core/theme/app_colors.dart';
 import '../../core/theme/app_metrics.dart';
@@ -92,85 +91,43 @@ class _FrostedTagBarState extends State<FrostedTagBar> {
     final colors = context.appColors;
     final isDark = Theme.of(context).brightness == Brightness.dark;
 
-    // 玻璃面板：填充越透越"毛"，深浅色各给一档。
-    final panelBase = Colors.white.withValues(alpha: isDark ? .10 : .42);
-    final sheenTop = Colors.white.withValues(alpha: isDark ? .12 : .55);
-    final sheenBottom = Colors.white.withValues(alpha: isDark ? .02 : .12);
-    final hairline = Colors.white.withValues(alpha: isDark ? .14 : .65);
-    final specular = Colors.white.withValues(alpha: isDark ? .22 : .9);
-
-    return ClipRRect(
-      borderRadius: BorderRadius.circular(28),
-      child: BackdropFilter(
-        // 模糊 + 提饱和：玻璃后面的内容既糊又"润"，这是 iOS 材质的灵魂。
-        filter: ImageFilter.compose(
-          outer: ImageFilter.blur(sigmaX: 28, sigmaY: 28),
-          inner: ColorFilter.matrix(_saturation(1.25)),
-        ),
-        child: Container(
-          decoration: BoxDecoration(
-            gradient: LinearGradient(
-              begin: Alignment.topCenter,
-              end: Alignment.bottomCenter,
-              colors: [sheenTop, panelBase, sheenBottom],
-              stops: const [0, .45, 1],
-            ),
-            borderRadius: BorderRadius.circular(28),
-            border: Border.all(color: hairline, width: 1),
-            boxShadow: [
-              BoxShadow(
-                color: colors.ink.withValues(alpha: isDark ? .35 : .12),
-                blurRadius: 28,
-                offset: const Offset(0, 10),
-              ),
-            ],
+    // Apple 液态玻璃：着色器真折射（边缘弯折背景）+ 镜面高光。
+    // 模糊必须很小（重度磨砂会把折射的边缘弯折糊掉，看起来就只是磨砂），
+    // 折射带宽 + 色散才有演示里那种"玻璃边"。
+    return LiquidGlassLens(
+      style: LiquidGlassStyle(
+        shape: LiquidGlassShape.continuousRoundedRectangle(cornerRadius: 24),
+        blur: 3,
+        saturation: 1.2,
+        refractionIndex: 1.18,
+        refractionWidth: 22,
+        dispersion: 0.5,
+        color: isDark
+            ? Colors.white.withValues(alpha: .05)
+            : Colors.white.withValues(alpha: .16),
+      ),
+      child: Row(
+        children: [
+          Expanded(child: _buildChips(colors)),
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: Space.sm),
+            child: _AddButton(onAdd: widget.onAdd),
           ),
-          child: Stack(
-            children: [
-              // 顶部 1px 镜面高光，玻璃"厚度"就靠它
-              Positioned(
-                left: 20,
-                right: 20,
-                top: 0,
-                height: 1,
-                child: DecoratedBox(
-                  decoration: BoxDecoration(
-                    gradient: LinearGradient(
-                      colors: [
-                        specular.withValues(alpha: 0),
-                        specular,
-                        specular.withValues(alpha: 0),
-                      ],
-                    ),
-                  ),
-                ),
-              ),
-              Row(
-                children: [
-                  Expanded(child: _buildChips(colors)),
-                  Padding(
-                    padding: const EdgeInsets.symmetric(horizontal: Space.sm),
-                    child: _AddButton(onAdd: widget.onAdd),
-                  ),
-                ],
-              ),
-            ],
-          ),
-        ),
+        ],
       ),
     );
   }
 
   Widget _buildChips(AppColors colors) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
     return SingleChildScrollView(
       controller: _scrollController,
       scrollDirection: Axis.horizontal,
-      padding:
-          const EdgeInsets.symmetric(horizontal: Space.md, vertical: Space.sm),
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
       child: Stack(
         key: _contentKey,
         children: [
-          // 滑动高亮胶囊（垫在 chip 文字下面）
+          // 滑动高亮胶囊：染色玻璃（半透品牌色 + 发丝描边），不是实心色块
           if (_chipRects.containsKey(widget.selectedIndex))
             AnimatedPositioned(
               key: ValueKey('pill-${widget.pages.length}'),
@@ -182,13 +139,17 @@ class _FrostedTagBarState extends State<FrostedTagBar> {
               height: _chipRects[widget.selectedIndex]!.height,
               child: Container(
                 decoration: BoxDecoration(
-                  color: colors.accent,
-                  borderRadius: BorderRadius.circular(20),
+                  color: colors.accent.withValues(alpha: isDark ? .40 : .28),
+                  borderRadius: BorderRadius.circular(15),
+                  border: Border.all(
+                    color: Colors.white.withValues(alpha: .30),
+                    width: .8,
+                  ),
                   boxShadow: [
                     BoxShadow(
-                      color: colors.accent.withValues(alpha: .35),
-                      blurRadius: 14,
-                      offset: const Offset(0, 4),
+                      color: colors.accent.withValues(alpha: .22),
+                      blurRadius: 10,
+                      offset: const Offset(0, 3),
                     ),
                   ],
                 ),
@@ -210,6 +171,7 @@ class _FrostedTagBarState extends State<FrostedTagBar> {
   Widget _buildChip(AppColors colors, int i) {
     final selected = i == widget.selectedIndex;
     final pressed = _pressedChip == i;
+    final isDark = Theme.of(context).brightness == Brightness.dark;
 
     // 每个 chip 一个 key，用于测量自身几何给滑动胶囊用
     _chipKeys[i] ??= GlobalKey();
@@ -229,31 +191,20 @@ class _FrostedTagBarState extends State<FrostedTagBar> {
         curve: Motion.easeOut,
         child: Padding(
           key: _chipKeys[i],
-          padding:
-              const EdgeInsets.symmetric(horizontal: Space.lg, vertical: 10),
+          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 7),
           child: AnimatedDefaultTextStyle(
             duration: Motion.normal,
             curve: Motion.easeOut,
             style: AppTypography.title(
-              color: selected ? colors.onAccent : colors.inkSub,
-            ).copyWith(fontSize: 14),
+              color: selected
+                  ? (isDark ? Colors.white : colors.accentDeep)
+                  : colors.inkSub,
+            ).copyWith(fontSize: 13),
             child: Text(widget.pages[i]),
           ),
         ),
       ),
     );
-  }
-
-  /// 标准饱和度矩阵：s=1 为原图，>1 提饱和。
-  static List<double> _saturation(double s) {
-    const lumR = 0.213, lumG = 0.715, lumB = 0.072;
-    final sr = (1 - s) * lumR, sg = (1 - s) * lumG, sb = (1 - s) * lumB;
-    return [
-      sr + s, sg, sb, 0, 0, //
-      sr, sg + s, sb, 0, 0, //
-      sr, sg, sb + s, 0, 0, //
-      0, 0, 0, 1, 0,
-    ];
   }
 }
 
@@ -284,8 +235,8 @@ class _AddButtonState extends State<_AddButton> {
         duration: Motion.fast,
         curve: Motion.easeOut,
         child: Container(
-          width: 40,
-          height: 40,
+          width: 34,
+          height: 34,
           decoration: BoxDecoration(
             gradient: LinearGradient(
               begin: Alignment.topCenter,
@@ -297,18 +248,18 @@ class _AddButtonState extends State<_AddButton> {
             ),
             shape: BoxShape.circle,
             border: Border.all(
-              color: Colors.white.withValues(alpha: .35),
-              width: 1,
+              color: Colors.white.withValues(alpha: .30),
+              width: .8,
             ),
             boxShadow: [
               BoxShadow(
-                color: colors.accent.withValues(alpha: .45),
-                blurRadius: 16,
-                offset: const Offset(0, 5),
+                color: colors.accent.withValues(alpha: .35),
+                blurRadius: 12,
+                offset: const Offset(0, 4),
               ),
             ],
           ),
-          child: Icon(Icons.add, color: colors.onAccent, size: 22),
+          child: Icon(Icons.add, color: colors.onAccent, size: 19),
         ),
       ),
     );

@@ -43,3 +43,8 @@ app.*.map.json
 /android/app/debug
 /android/app/profile
 /android/app/release
+
+# 正式签名密钥（本地文件，走 GitHub Secrets 进 CI）
+android/key.properties
+android/app/*.jks
+android/app/*.keystore
