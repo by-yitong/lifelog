@@ -1,6 +1,8 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
     <!-- 应用内更新：下载 APK 后拉起系统安装器需要 -->
     <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
+    <!-- 联网：动漫封面搜索（Bangumi）与应用内更新检查 -->
+    <uses-permission android:name="android.permission.INTERNET" />
     <application
         android:label="数一数"
         android:name="${applicationName}"

@@ -68,6 +68,29 @@ void main() {
     expect(await db.select(db.entries).get(), isEmpty);
   });
 
+  test('createCounter 支持初始值：事务内写入首条记录', () async {
+    const id = 'c-init';
+    await repo.createCounter(
+      CountersCompanion.insert(
+        id: id,
+        name: '看动漫',
+        unit: const Value('集'),
+        createdAt: DateTime(2026, 1, 1),
+      ),
+      initialValue: 235,
+    );
+
+    expect(await repo.currentValue(id), 235);
+    final entries = await repo.watchEntriesOf(id).first;
+    expect(entries, hasLength(1));
+    expect(entries.single.delta, 235);
+    expect(entries.single.valueAfter, 235);
+    expect(entries.single.occurredAt, DateTime(2026, 1, 1));
+
+    final counter = await (db.select(db.counters)).getSingle();
+    expect(counter.lastTouchedAt, DateTime(2026, 1, 1));
+  });
+
   test('watchCounters 按 archived 过滤', () async {
     final id = await seedCounter();
     expect((await repo.watchCounters().first).length, 1);

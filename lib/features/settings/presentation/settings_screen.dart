@@ -35,7 +35,7 @@ class SettingsScreen extends ConsumerWidget {
           const SizedBox(height: Space.sm),
           SegmentedButton<ThemeMode>(
             segments: const [
-              ButtonSegment(value: ThemeMode.system, label: Text('跟随系统')),
+              ButtonSegment(value: ThemeMode.system, label: Text('系统')),
               ButtonSegment(value: ThemeMode.light, label: Text('浅色')),
               ButtonSegment(value: ThemeMode.dark, label: Text('深色')),
             ],

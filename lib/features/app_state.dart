@@ -29,9 +29,9 @@ enum SortMode { recent, name, created }
 
 extension SortModeLabel on SortMode {
   String get label => switch (this) {
-        SortMode.recent => '最近使用',
+        SortMode.recent => '最近',
         SortMode.name => '名称',
-        SortMode.created => '创建时间',
+        SortMode.created => '创建',
       };
 }
 

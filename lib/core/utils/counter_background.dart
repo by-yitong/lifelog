@@ -34,6 +34,30 @@ abstract final class CounterBackgroundStore {
     }
   }
 
+  /// 把下载好的图片字节写入常驻文件（动漫封面场景），返回新路径。
+  ///
+  /// [oldPath] 是该计数器原来的背景图，写入成功后删除。
+  static Future<String?> saveFromBytes(
+    List<int> bytes, {
+    String? oldPath,
+    String ext = 'jpg',
+  }) async {
+    try {
+      final dir = await _ensureDir();
+      final target = File(
+        '${dir.path}/${DateTime.now().microsecondsSinceEpoch}.$ext',
+      );
+      await target.writeAsBytes(bytes, flush: true);
+      await delete(oldPath);
+      return target.path;
+    } on FileSystemException {
+      return null;
+    }
+  }
+
+  /// 路径是否已是 counter_bg 目录内的常驻文件（无需再拷贝）。
+  static bool isManaged(String path) => path.contains('/$_dirName/');
+
   /// 删除背景图文件（不存在或失败都静默处理）。
   static Future<void> delete(String? path) async {
     if (path == null || path.isEmpty) return;

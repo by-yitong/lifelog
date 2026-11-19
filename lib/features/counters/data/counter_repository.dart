@@ -29,8 +29,30 @@ class CounterRepository {
         .watch();
   }
 
-  Future<void> createCounter(CountersCompanion c) =>
-      _db.into(_db.counters).insert(c);
+  /// 创建计数器；[initialValue] 是新建时的"初始值"，
+  /// 事务内写入一条等量记录，总数恒等于 delta 之和的规则不被打破。
+  Future<void> createCounter(CountersCompanion c,
+      {int initialValue = 0}) {
+    return _db.transaction(() async {
+      await _db.into(_db.counters).insert(c);
+      if (initialValue > 0) {
+        final now =
+            c.createdAt.present ? c.createdAt.value : DateTime.now();
+        await _db.into(_db.entries).insert(
+              EntriesCompanion.insert(
+                id: _uuid.v4(),
+                counterId: c.id.value,
+                delta: initialValue,
+                valueAfter: initialValue,
+                occurredAt: now,
+              ),
+            );
+        await (_db.update(_db.counters)
+              ..where((x) => x.id.equals(c.id.value)))
+            .write(CountersCompanion(lastTouchedAt: Value(now)));
+      }
+    });
+  }
 
   Future<void> updateCounter(CountersCompanion c) =>
       (_db.update(_db.counters)..where((x) => x.id.equals(c.id.value)))

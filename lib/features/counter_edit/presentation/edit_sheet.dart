@@ -14,6 +14,8 @@ import '../../../core/theme/app_metrics.dart';
 import '../../../core/theme/app_typography.dart';
 import '../../../core/utils/counter_background.dart';
 import '../../app_state.dart';
+import '../data/bangumi.dart';
+import 'bangumi_search_page.dart';
 
 /// 新建 / 编辑计数器的底部抽屉。
 Future<void> showEditSheet(BuildContext context,
@@ -53,6 +55,9 @@ class _EditSheetState extends ConsumerState<_EditSheet> {
       text: widget.existing?.dailyTarget?.toString() ?? '');
   late final TextEditingController _tag =
       TextEditingController(text: widget.existing?.tag ?? widget.initialTag);
+
+  /// 只在新建时可填：创建后立刻记入的累计值（比如已看完的集数）。
+  late final TextEditingController _initial = TextEditingController();
   late String _emoji = widget.existing?.emoji ?? '✨';
 
   /// 新建时随机挑一个颜色；编辑时沿用原有颜色。
@@ -61,9 +66,10 @@ class _EditSheetState extends ConsumerState<_EditSheet> {
   late int _stepSize = widget.existing?.stepSize ?? 1;
   late bool _hasTarget = widget.existing?.dailyTarget != null;
 
-  /// 背景图：编辑中持有的是相册临时路径或已有常驻路径，
-  /// 保存时才真正拷贝进应用目录。
+  /// 背景图：编辑中持有的是相册临时路径、封面常驻路径或已有常驻路径，
+  /// 保存时才真正把相册临时图拷贝进应用目录。
   late String? _bgPath = widget.existing?.bgImagePath;
+  bool _fetchingCover = false;
   bool _saving = false;
 
   void _rerollColor() =>
@@ -92,7 +98,50 @@ class _EditSheetState extends ConsumerState<_EditSheet> {
     _unit.dispose();
     _target.dispose();
     _tag.dispose();
+    _initial.dispose();
     super.dispose();
+  }
+
+  /// 打开封面搜索页，选中后下载并存为常驻背景图。
+  Future<void> _applyBangumiCover() async {
+    final subject = await Navigator.push<BangumiSubject>(
+      context,
+      MaterialPageRoute(
+        builder: (_) =>
+            BangumiSearchPage(initialKeyword: _name.text.trim()),
+      ),
+    );
+    if (subject == null || !mounted) return;
+
+    final messenger = ScaffoldMessenger.of(context);
+    setState(() => _fetchingCover = true);
+    try {
+      final bytes = await BangumiApi.downloadCover(subject.coverUrl);
+      // 若之前已有常驻图（旧封面/旧背景），替换时一并清掉
+      final current = _bgPath;
+      final oldManaged =
+          (current != null && CounterBackgroundStore.isManaged(current))
+              ? current
+              : widget.existing?.bgImagePath;
+      final path = await CounterBackgroundStore.saveFromBytes(
+        bytes,
+        oldPath: oldManaged,
+      );
+      if (!mounted) return;
+      if (path == null) {
+        messenger.showSnackBar(
+          const SnackBar(content: Text('封面保存失败，重试一次吧')),
+        );
+      } else {
+        setState(() => _bgPath = path);
+      }
+    } catch (_) {
+      messenger.showSnackBar(
+        const SnackBar(content: Text('封面下载失败，检查网络后重试')),
+      );
+    } finally {
+      if (mounted) setState(() => _fetchingCover = false);
+    }
   }
 
   @override
@@ -249,12 +298,14 @@ class _EditSheetState extends ConsumerState<_EditSheet> {
             ),
             const SizedBox(height: Space.lg),
 
-            // 背景图（可选）
+            // 封面 / 背景图（可选）
             _BackgroundPicker(
               path: _bgPath,
+              searching: _fetchingCover,
               fallbackColor: colors.cardPalette[
                   _colorIndex % colors.cardPalette.length].container,
               onPick: _pickBackground,
+              onSearchCover: _applyBangumiCover,
               onRemove: () => setState(() => _bgPath = null),
             ),
             const SizedBox(height: Space.lg),
@@ -299,6 +350,26 @@ class _EditSheetState extends ConsumerState<_EditSheet> {
               selected: {_stepSize},
               onSelectionChanged: (s) => setState(() => _stepSize = s.first),
             ),
+
+            // 初始值：只在新建时出现（编辑请用详情页的手动调整）
+            if (widget.existing == null) ...[
+              const SizedBox(height: Space.md),
+              Text('初始值（可选，已经累计了多少）',
+                  style: AppTypography.caption(color: colors.inkSub)),
+              const SizedBox(height: Space.sm),
+              TextField(
+                controller: _initial,
+                keyboardType: TextInputType.number,
+                inputFormatters: [FilteringTextInputFormatter.digitsOnly],
+                autofillHints: const [],
+                maxLength: 6,
+                style: AppTypography.body(color: colors.ink),
+                decoration: const InputDecoration(
+                  counterText: '',
+                  hintText: '如：已经看了 235 集',
+                ),
+              ),
+            ],
 
             const SizedBox(height: Space.lg),
             SwitchListTile(
@@ -361,10 +432,13 @@ class _EditSheetState extends ConsumerState<_EditSheet> {
     setState(() => _saving = true);
 
     // 背景图落盘：新选的相册临时图拷进应用目录；
+    // 封面等已在应用目录里的常驻文件直接沿用；
     // 被移除的旧图直接删除；未改动的保持原路径。
     final originalBg = widget.existing?.bgImagePath;
     String? finalBg = _bgPath;
-    if (finalBg != null && finalBg != originalBg) {
+    if (finalBg != null &&
+        finalBg != originalBg &&
+        !CounterBackgroundStore.isManaged(finalBg)) {
       finalBg = await CounterBackgroundStore.saveFromTemp(
         finalBg,
         oldPath: originalBg,
@@ -389,6 +463,7 @@ class _EditSheetState extends ConsumerState<_EditSheet> {
           tag: Value(_tag.text.trim()),
           createdAt: DateTime.now(),
         ),
+        initialValue: int.tryParse(_initial.text.trim()) ?? 0,
       );
     } else {
       await repo.updateCounter(
@@ -409,18 +484,22 @@ class _EditSheetState extends ConsumerState<_EditSheet> {
   }
 }
 
-/// 背景图选择区：未设置时是一个虚线占位卡，
-/// 已设置时显示预览 + 更换 / 移除。
+/// 封面 / 背景图选择区：未设置时是「相册」「搜动漫封面」两个入口，
+/// 已设置时显示预览 + 更换（相册）/ 搜封面 / 移除。
 class _BackgroundPicker extends StatelessWidget {
   final String? path;
+  final bool searching;
   final Color fallbackColor;
   final VoidCallback onPick;
+  final VoidCallback onSearchCover;
   final VoidCallback onRemove;
 
   const _BackgroundPicker({
     required this.path,
+    required this.searching,
     required this.fallbackColor,
     required this.onPick,
+    required this.onSearchCover,
     required this.onRemove,
   });
 
@@ -432,100 +511,147 @@ class _BackgroundPicker extends StatelessWidget {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Text('背景图（可选，比如喜欢的动漫图）',
+        Text('封面 / 背景图（可选）',
             style: AppTypography.caption(color: colors.inkSub)),
         const SizedBox(height: Space.sm),
-        GestureDetector(
-          onTap: onPick,
-          child: ClipRRect(
+        if (!hasImage)
+          Row(
+            children: [
+              Expanded(
+                child: _SourceTile(
+                  icon: Icons.image_outlined,
+                  label: '从相册选',
+                  onTap: onPick,
+                ),
+              ),
+              const SizedBox(width: Space.sm),
+              Expanded(
+                child: _SourceTile(
+                  icon: Icons.travel_explore,
+                  label: '搜动漫封面',
+                  onTap: onSearchCover,
+                ),
+              ),
+            ],
+          )
+        else
+          ClipRRect(
             borderRadius: BorderRadius.circular(RadiusToken.field),
             child: Container(
-              height: hasImage ? 132 : 84,
+              height: 132,
               width: double.infinity,
-              color: hasImage ? null : colors.surfaceAlt,
-              foregroundDecoration: hasImage
-                  ? null
-                  : BoxDecoration(
-                      borderRadius: BorderRadius.circular(RadiusToken.field),
-                      border: Border.all(
-                        color: colors.outline,
-                        width: 1.2,
+              foregroundDecoration: BoxDecoration(
+                borderRadius: BorderRadius.circular(RadiusToken.field),
+              ),
+              child: Stack(
+                fit: StackFit.expand,
+                children: [
+                  Image.file(
+                    File(path!),
+                    fit: BoxFit.cover,
+                    gaplessPlayback: true,
+                    errorBuilder: (_, _, _) =>
+                        ColoredBox(color: fallbackColor),
+                  ),
+                  // 底部渐变让按钮在任何图上都可读
+                  const DecoratedBox(
+                    decoration: BoxDecoration(
+                      gradient: LinearGradient(
+                        begin: Alignment.topCenter,
+                        end: Alignment.bottomCenter,
+                        stops: [0.45, 1],
+                        colors: [Colors.transparent, Colors.black54],
                       ),
                     ),
-              child: hasImage
-                  ? Stack(
-                      fit: StackFit.expand,
+                  ),
+                  Positioned(
+                    right: Space.sm,
+                    bottom: Space.sm,
+                    child: Row(
                       children: [
-                        Image.file(
-                          File(path!),
-                          fit: BoxFit.cover,
-                          gaplessPlayback: true,
-                          errorBuilder: (_, _, _) => ColoredBox(
-                              color: fallbackColor),
+                        _PickerAction(
+                          icon: Icons.auto_awesome_mosaic_outlined,
+                          label: '更换',
+                          onTap: onPick,
                         ),
-                        // 底部渐变让按钮在任何图上都可读
-                        const DecoratedBox(
-                          decoration: BoxDecoration(
-                            gradient: LinearGradient(
-                              begin: Alignment.topCenter,
-                              end: Alignment.bottomCenter,
-                              stops: [0.45, 1],
-                              colors: [Colors.transparent, Colors.black54],
-                            ),
-                          ),
+                        const SizedBox(width: Space.sm),
+                        _PickerAction(
+                          icon: searching
+                              ? null
+                              : Icons.travel_explore,
+                          label: '搜封面',
+                          busy: searching,
+                          onTap: searching ? null : onSearchCover,
                         ),
-                        Positioned(
-                          right: Space.sm,
-                          bottom: Space.sm,
-                          child: Row(
-                            children: [
-                              _PickerAction(
-                                icon: Icons.auto_awesome_mosaic_outlined,
-                                label: '更换',
-                                onTap: onPick,
-                              ),
-                              const SizedBox(width: Space.sm),
-                              _PickerAction(
-                                icon: Icons.close,
-                                label: '移除',
-                                onTap: onRemove,
-                              ),
-                            ],
-                          ),
+                        const SizedBox(width: Space.sm),
+                        _PickerAction(
+                          icon: Icons.close,
+                          label: '移除',
+                          onTap: onRemove,
                         ),
                       ],
-                    )
-                  : Center(
-                      child: Row(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          Icon(Icons.image_outlined,
-                              size: 20, color: colors.inkFaint),
-                          const SizedBox(width: Space.sm),
-                          Text('从相册选一张图做卡片背景',
-                              style:
-                                  AppTypography.caption(color: colors.inkFaint)),
-                        ],
-                      ),
                     ),
+                  ),
+                ],
+              ),
             ),
           ),
-        ),
       ],
     );
   }
 }
 
-/// 背景图预览上的半透明小按钮。
-class _PickerAction extends StatelessWidget {
+/// 未选图时的入口卡片。
+class _SourceTile extends StatelessWidget {
   final IconData icon;
   final String label;
   final VoidCallback onTap;
+
+  const _SourceTile({
+    required this.icon,
+    required this.label,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = context.appColors;
+    return Material(
+      color: colors.surfaceAlt,
+      borderRadius: BorderRadius.circular(RadiusToken.field),
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(RadiusToken.field),
+        child: SizedBox(
+          height: 68,
+          child: Row(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Icon(icon, size: 18, color: colors.inkSub),
+              const SizedBox(width: Space.sm),
+              Text(label,
+                  style: AppTypography.caption(color: colors.inkSub)
+                      .copyWith(fontWeight: FontWeight.w600)),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// 背景图预览上的半透明小按钮；[busy] 时图标换成小加载圈并禁点。
+class _PickerAction extends StatelessWidget {
+  final IconData? icon;
+  final String label;
+  final bool busy;
+  final VoidCallback? onTap;
 
   const _PickerAction({
     required this.icon,
     required this.label,
     required this.onTap,
+    this.busy = false,
   });
 
   @override
@@ -547,7 +673,15 @@ class _PickerAction extends StatelessWidget {
         child: Row(
           mainAxisSize: MainAxisSize.min,
           children: [
-            Icon(icon, size: 14, color: Colors.white),
+            if (busy)
+              const SizedBox(
+                width: 12,
+                height: 12,
+                child: CircularProgressIndicator(
+                    strokeWidth: 2, color: Colors.white),
+              )
+            else
+              Icon(icon, size: 14, color: Colors.white),
             const SizedBox(width: Space.xs),
             Text(label,
                 style: AppTypography.caption(color: Colors.white)
