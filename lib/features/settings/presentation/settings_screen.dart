@@ -7,6 +7,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:share_plus/share_plus.dart';
 
+import '../../../core/analytics/app_analytics.dart';
 import '../../../core/db/database.dart';
 import '../../../core/theme/app_colors.dart';
 import '../../../core/theme/app_metrics.dart';
@@ -123,6 +124,18 @@ class SettingsScreen extends ConsumerWidget {
           ),
 
           const SizedBox(height: Space.xxl),
+          _SectionLabel('隐私'),
+          const SizedBox(height: Space.sm),
+          Container(
+            decoration: BoxDecoration(
+              color: colors.surface,
+              borderRadius: BorderRadius.circular(RadiusToken.field),
+            ),
+            clipBehavior: Clip.antiAlias,
+            child: const _AnalyticsTile(),
+          ),
+
+          const SizedBox(height: Space.xxl),
           _SectionLabel('关于'),
           const SizedBox(height: Space.sm),
           Container(
@@ -143,8 +156,12 @@ class SettingsScreen extends ConsumerWidget {
                   ),
                 ),
                 const SizedBox(height: Space.xs),
-                Text('记录一件事情做了多少次。所有数据只保存在这台手机上。',
-                    style: AppTypography.body(color: colors.inkSub)),
+                Text(
+                  '记录一件事情做了多少次。计数数据只保存在这台手机上；'
+                  '匿名使用统计默认开启（仅上报功能使用次数与崩溃信息，'
+                  '不含任何计数内容），可在「隐私」中关闭。',
+                  style: AppTypography.body(color: colors.inkSub),
+                ),
               ],
             ),
           ),
@@ -423,6 +440,47 @@ class _SectionLabel extends StatelessWidget {
   Widget build(BuildContext context) {
     return Text(text,
         style: AppTypography.caption(color: context.appColors.inkSub));
+  }
+}
+
+/// 匿名使用统计开关：默认关闭；开启才初始化采集，关闭即停止并清除待上报数据。
+class _AnalyticsTile extends StatefulWidget {
+  const _AnalyticsTile();
+
+  @override
+  State<_AnalyticsTile> createState() => _AnalyticsTileState();
+}
+
+class _AnalyticsTileState extends State<_AnalyticsTile> {
+  bool? _on;
+
+  @override
+  void initState() {
+    super.initState();
+    _on = true; // 默认开启，读到用户设置后再校正
+    AppAnalytics.loadEnabled().then((value) {
+      if (mounted) setState(() => _on = value);
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = context.appColors;
+    return SwitchListTile(
+      contentPadding: const EdgeInsets.symmetric(horizontal: Space.lg),
+      title: Text('匿名使用统计', style: AppTypography.title(color: colors.ink)),
+      subtitle: Text(
+        '默认开启，帮助改进「数一数」。只上报功能使用次数和崩溃信息，不含任何计数内容和个人数据，可随时关闭。',
+        style: AppTypography.caption(color: colors.inkFaint),
+      ),
+      value: _on ?? false,
+      onChanged: _on == null
+          ? null
+          : (v) {
+              setState(() => _on = v);
+              AppAnalytics.setEnabled(v);
+            },
+    );
   }
 }
 

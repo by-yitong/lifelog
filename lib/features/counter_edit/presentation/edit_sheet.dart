@@ -8,6 +8,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:uuid/uuid.dart';
 
+import '../../../core/analytics/app_analytics.dart';
 import '../../../core/db/database.dart';
 import '../../../core/theme/app_colors.dart';
 import '../../../core/theme/app_metrics.dart';
@@ -134,6 +135,7 @@ class _EditSheetState extends ConsumerState<_EditSheet> {
         );
       } else {
         setState(() => _bgPath = path);
+        AppAnalytics.track('cover_search');
       }
     } catch (_) {
       messenger.showSnackBar(
@@ -450,6 +452,7 @@ class _EditSheetState extends ConsumerState<_EditSheet> {
     final repo = ref.read(counterRepositoryProvider);
     final existing = widget.existing;
     if (existing == null) {
+      AppAnalytics.track('counter_add');
       await repo.createCounter(
         CountersCompanion.insert(
           id: const Uuid().v4(),

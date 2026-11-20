@@ -1,6 +1,7 @@
 import 'package:drift/drift.dart';
 import 'package:uuid/uuid.dart';
 
+import '../../../core/analytics/app_analytics.dart';
 import '../../../core/db/database.dart';
 
 /// 计数器与记录的数据访问。数值 = 该计数器全部 Entry.delta 之和。
@@ -93,6 +94,7 @@ class CounterRepository {
     DateTime? at,
   }) {
     final now = DateTime.now();
+    AppAnalytics.track('counter_count');
     return _db.transaction(() async {
       final current = await currentValue(counterId);
       final entry = Entry(
